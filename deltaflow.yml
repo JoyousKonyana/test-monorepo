@@ -1,0 +1,26 @@
+version: 1
+
+# Global triggers — changes to these files mark ALL services as affected.
+# Useful for shared CI config, root-level dependencies, or infrastructure.
+global_triggers:
+  - .github/workflows/**
+  - go.mod
+  - go.sum
+
+# Define your services and the paths that belong to each one.
+# Supports doublestar glob patterns (e.g. services/api/**)
+services:
+  api:
+    paths:
+      - services/api/**
+      - packages/shared/**
+
+  worker:
+    paths:
+      - services/worker/**
+      - packages/shared/**
+
+  frontend:
+    paths:
+      - services/frontend/**
+      - packages/ui/**

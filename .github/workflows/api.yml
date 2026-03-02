@@ -1,0 +1,112 @@
+name: API Pipeline
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  # ── Step 1: Call the shared Deltaflow detect workflow ─────────────────────
+  # This is the only connection to Deltaflow — one job, one line.
+  # All outputs from detect.yml are now available via needs.detect.outputs.*
+
+  detect:
+    name: Detect changes
+    uses: ./.github/workflows/detect.yml   # calls the shared detect workflow
+    # Optional: override defaults
+    # with:
+    #   base-ref: "origin/develop"
+    #   config-path: "./deltaflow.yml"
+
+  # ── Step 2: Lint ──────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    needs: detect
+    if: needs.detect.outputs.api == 'true'   # skip entirely if api unchanged
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Run linter
+        run: |
+          go vet ./services/api/...
+          # golangci-lint run ./services/api/...
+
+  # ── Step 3: Test ──────────────────────────────────────────────────────────
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: [detect, lint]
+    if: needs.detect.outputs.api == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Run tests
+        run: go test ./services/api/... -v -race -coverprofile=coverage.out
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-coverage
+          path: coverage.out
+
+  # ── Step 4: Build ─────────────────────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [detect, test]
+    if: |
+      needs.detect.outputs.api == 'true' &&
+      needs.test.result == 'success'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build binary
+        run: |
+          go build -o bin/api ./services/api/...
+
+      - name: Build Docker image
+        run: |
+          docker build -t api:${{ github.sha }} ./services/api/
+
+      - name: Push to registry
+        run: |
+          echo ${{ secrets.REGISTRY_PASSWORD }} | docker login -u ${{ secrets.REGISTRY_USER }} --password-stdin
+          docker push api:${{ github.sha }}
+
+  # ── Step 5: Deploy ────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: [detect, build]
+    environment: production          # GitHub environment gate — requires approval
+    if: |
+      github.ref == 'refs/heads/main' &&
+      needs.detect.outputs.api == 'true' &&
+      needs.build.result == 'success'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy api
+        run: |
+          echo "Deploying api @ ${{ github.sha }}"
+          echo "Affected services this run: ${{ needs.detect.outputs.affected }}"
+          # kubectl set image deployment/api api=api:${{ github.sha }}
+          # helm upgrade --install api ./charts/api --set image.tag=${{ github.sha }}
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}

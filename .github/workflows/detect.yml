@@ -1,0 +1,85 @@
+name: Deltaflow Detect (Reusable)
+
+# This workflow is ONLY called by other workflows — it never triggers directly.
+# Any service pipeline in this repo can call it and receive detection outputs.
+
+on:
+  workflow_call:
+    inputs:
+      base-ref:
+        description: "Base ref to compare against (default: origin/main)"
+        type: string
+        required: false
+        default: "origin/main"
+      config-path:
+        description: "Path to deltaflow.yml (default: ./deltaflow.yml)"
+        type: string
+        required: false
+        default: "./deltaflow.yml"
+
+    # These are the values every caller receives back.
+    # Access them via: needs.<job-id>.outputs.<key>
+    outputs:
+      affected:
+        description: "Comma-separated list of all affected services"
+        value: ${{ jobs.detect.outputs.affected }}
+      has_changes:
+        description: "true if any service was affected"
+        value: ${{ jobs.detect.outputs.has_changes }}
+      global_trigger:
+        description: "true if a global trigger file changed (all services affected)"
+        value: ${{ jobs.detect.outputs.global_trigger }}
+      api:
+        description: "true if api service was affected"
+        value: ${{ jobs.detect.outputs.api }}
+      frontend:
+        description: "true if frontend service was affected"
+        value: ${{ jobs.detect.outputs.frontend }}
+      worker:
+        description: "true if worker service was affected"
+        value: ${{ jobs.detect.outputs.worker }}
+
+jobs:
+  detect:
+    name: Run Deltaflow
+    runs-on: ubuntu-latest
+
+    outputs:
+      affected:       ${{ steps.delta.outputs.affected }}
+      has_changes:    ${{ steps.delta.outputs.has_changes }}
+      global_trigger: ${{ steps.delta.outputs.global_trigger }}
+      api:            ${{ steps.delta.outputs.api }}
+      frontend:       ${{ steps.delta.outputs.frontend }}
+      worker:         ${{ steps.delta.outputs.worker }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # required — deltaflow needs full git history to diff
+
+      - name: Install Deltaflow
+        run: |
+          curl -sSL https://github.com/JoyousKonyana/delta-flow/releases/latest/download/deltaflow-linux-amd64 \
+            -o /usr/local/bin/deltaflow
+          chmod +x /usr/local/bin/deltaflow
+
+      - name: Run Deltaflow detect
+        id: delta
+        run: |
+          deltaflow detect \
+            --base=${{ inputs.base-ref }} \
+            --config=${{ inputs.config-path }} \
+            --format=gha
+
+      - name: Detection summary
+        run: |
+          echo "## 🔍 Deltaflow Detection" >> $GITHUB_STEP_SUMMARY
+          echo "| Service  | Affected |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| api      | \`${{ steps.delta.outputs.api }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| frontend | \`${{ steps.delta.outputs.frontend }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| worker   | \`${{ steps.delta.outputs.worker }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Affected:** \`${{ steps.delta.outputs.affected }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Global trigger:** \`${{ steps.delta.outputs.global_trigger }}\`" >> $GITHUB_STEP_SUMMARY

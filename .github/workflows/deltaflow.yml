@@ -1,0 +1,85 @@
+name: Deltaflow CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  # ── Step 1: detect which services changed ──────────────────────────────────
+  detect:
+    name: Detect changed services
+    runs-on: ubuntu-latest
+    outputs:
+      affected:       ${{ steps.delta.outputs.affected }}
+      has_changes:    ${{ steps.delta.outputs.has_changes }}
+      global_trigger: ${{ steps.delta.outputs.global_trigger }}
+      api: ${{ steps.delta.outputs.api }}
+      frontend: ${{ steps.delta.outputs.frontend }}
+      worker: ${{ steps.delta.outputs.worker }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # required — deltaflow needs full git history
+
+      - name: Install Deltaflow
+        run: |
+          curl -sSL https://github.com/JoyousKonyana/delta-flow/releases/latest/download/deltaflow-linux-amd64 \
+            -o /usr/local/bin/deltaflow
+          chmod +x /usr/local/bin/deltaflow
+
+      - name: Run Deltaflow
+        id: delta
+        run: deltaflow detect --base=origin/main --format=gha
+
+  # ── Step 2: deploy only affected services ──────────────────────────────────
+  deploy-api:
+    name: Deploy api
+    needs: detect
+    if: needs.detect.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy api
+        run: |
+          echo "Deploying api..."
+          # TODO: replace with your actual deploy command
+          # e.g. kubectl apply -f services/api/
+          #      helm upgrade --install api ./charts/api
+          #      ./scripts/deploy.sh api
+
+  deploy-frontend:
+    name: Deploy frontend
+    needs: detect
+    if: needs.detect.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy frontend
+        run: |
+          echo "Deploying frontend..."
+          # TODO: replace with your actual deploy command
+          # e.g. kubectl apply -f services/frontend/
+          #      helm upgrade --install frontend ./charts/frontend
+          #      ./scripts/deploy.sh frontend
+
+  deploy-worker:
+    name: Deploy worker
+    needs: detect
+    if: needs.detect.outputs.worker == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy worker
+        run: |
+          echo "Deploying worker..."
+          # TODO: replace with your actual deploy command
+          # e.g. kubectl apply -f services/worker/
+          #      helm upgrade --install worker ./charts/worker
+          #      ./scripts/deploy.sh worker
+
