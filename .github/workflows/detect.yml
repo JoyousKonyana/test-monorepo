@@ -7,10 +7,10 @@ on:
   workflow_call:
     inputs:
       base-ref:
-        description: "Base ref to compare against (default: origin/main)"
+        description: "Base ref to compare against (default: auto-detected)"
         type: string
         required: false
-        default: "origin/main"
+        default: ""
       config-path:
         description: "Path to deltaflow.yml (default: ./deltaflow.yml)"
         type: string
@@ -64,11 +64,35 @@ jobs:
             -o /usr/local/bin/deltaflow
           chmod +x /usr/local/bin/deltaflow
 
+      - name: Resolve base ref
+        id: base
+        run: |
+          # If caller explicitly passed a base-ref, use it
+          if [ -n "${{ inputs.base-ref }}" ]; then
+            BASE="${{ inputs.base-ref }}"
+
+          # For pull requests — compare against the target branch
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            BASE="origin/${{ github.base_ref }}"
+
+          # For pushes — compare against the commit before this push
+          else
+            BASE="${{ github.event.before }}"
+          fi
+
+          # Fallback: if BASE is all zeros (first ever push) or empty, use HEAD~1
+          if [ "$BASE" = "0000000000000000000000000000000000000000" ] || [ -z "$BASE" ]; then
+            BASE="HEAD~1"
+          fi
+
+          echo "Resolved base: $BASE"
+          echo "base=$BASE" >> $GITHUB_OUTPUT
+
       - name: Run Deltaflow detect
         id: delta
         run: |
           deltaflow detect \
-            --base=${{ inputs.base-ref }} \
+            --base=${{ steps.base.outputs.base }} \
             --config=${{ inputs.config-path }} \
             --format=gha
 
@@ -81,5 +105,6 @@ jobs:
           echo "| frontend | \`${{ steps.delta.outputs.frontend }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| worker   | \`${{ steps.delta.outputs.worker }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Base ref:** \`${{ steps.base.outputs.base }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Affected:** \`${{ steps.delta.outputs.affected }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Global trigger:** \`${{ steps.delta.outputs.global_trigger }}\`" >> $GITHUB_STEP_SUMMARY
