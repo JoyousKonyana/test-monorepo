@@ -1,52 +1,31 @@
 name: Deltaflow Detect (Reusable)
 
-# This workflow is ONLY called by other workflows — it never triggers directly.
-# Any service pipeline in this repo can call it and receive detection outputs.
-
 on:
   workflow_call:
     inputs:
-      event-name:
-        description: "The caller's event name (push or pull_request)"
-        type: string
-        required: true
-      base-ref:
-        description: "For pull_request: the target branch. For push: the before commit SHA."
-        type: string
-        required: true
       config-path:
         description: "Path to deltaflow.yml"
         type: string
         required: false
         default: "./deltaflow.yml"
-
-    # These are the values every caller receives back.
-    # Access them via: needs.<job-id>.outputs.<key>
     outputs:
       affected:
-        description: "Comma-separated list of all affected services"
         value: ${{ jobs.detect.outputs.affected }}
       has_changes:
-        description: "true if any service was affected"
         value: ${{ jobs.detect.outputs.has_changes }}
       global_trigger:
-        description: "true if a global trigger file changed (all services affected)"
         value: ${{ jobs.detect.outputs.global_trigger }}
       api:
-        description: "true if api service was affected"
         value: ${{ jobs.detect.outputs.api }}
       frontend:
-        description: "true if frontend service was affected"
         value: ${{ jobs.detect.outputs.frontend }}
       worker:
-        description: "true if worker service was affected"
         value: ${{ jobs.detect.outputs.worker }}
 
 jobs:
   detect:
     name: Run Deltaflow
     runs-on: ubuntu-latest
-
     outputs:
       affected:       ${{ steps.delta.outputs.affected }}
       has_changes:    ${{ steps.delta.outputs.has_changes }}
@@ -59,7 +38,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # required — deltaflow needs full git history to diff
+          fetch-depth: 0
+
+      - name: Fetch all remote refs
+        run: git fetch --all
 
       - name: Install Deltaflow
         run: |
@@ -70,39 +52,35 @@ jobs:
       - name: Resolve base ref
         id: base
         run: |
-          EVENT="${{ inputs.event-name }}"
-          REF="${{ inputs.base-ref }}"
-
-          if [ "$EVENT" == "pull_request" ]; then
-            # REF is the target branch name e.g. "master"
-            BASE="origin/$REF"
-
-          elif [ "$EVENT" == "push" ]; then
-            # REF is the SHA of the commit before this push
-            # If all zeros it is the first push ever — fall back to HEAD~1
-            if [ "$REF" = "0000000000000000000000000000000000000000" ] || [ -z "$REF" ]; then
+          if [ -n "$GITHUB_BASE_REF" ]; then
+            BASE="origin/$GITHUB_BASE_REF"
+            echo "PR detected — base: $BASE"
+          elif [ -n "$GITHUB_EVENT_PATH" ]; then
+            BEFORE=$(cat $GITHUB_EVENT_PATH | python3 -c "import sys,json; e=json.load(sys.stdin); print(e.get('before',''))" 2>/dev/null || echo "")
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
               BASE="HEAD~1"
+              echo "First push — base: $BASE"
             else
-              BASE="$REF"
+              BASE="$BEFORE"
+              echo "Push detected — base: $BASE"
             fi
-
           else
             BASE="HEAD~1"
+            echo "Fallback — base: $BASE"
           fi
-
-          echo "Event:         $EVENT"
-          echo "Resolved base: $BASE"
           echo "base=$BASE" >> $GITHUB_OUTPUT
 
       - name: Run Deltaflow detect
         id: delta
         run: |
+          echo "Running: deltaflow detect --base=${{ steps.base.outputs.base }} --format=gha"
           deltaflow detect \
             --base=${{ steps.base.outputs.base }} \
             --config=${{ inputs.config-path }} \
             --format=gha
 
       - name: Detection summary
+        if: always()
         run: |
           echo "## 🔍 Deltaflow Detection" >> $GITHUB_STEP_SUMMARY
           echo "| Service  | Affected |" >> $GITHUB_STEP_SUMMARY
@@ -111,7 +89,6 @@ jobs:
           echo "| frontend | \`${{ steps.delta.outputs.frontend }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| worker   | \`${{ steps.delta.outputs.worker }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Event:** \`${{ inputs.event-name }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Base ref:** \`${{ steps.base.outputs.base }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Affected:** \`${{ steps.delta.outputs.affected }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Global trigger:** \`${{ steps.delta.outputs.global_trigger }}\`" >> $GITHUB_STEP_SUMMARY
