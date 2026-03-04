@@ -10,9 +10,6 @@ jobs:
   detect:
     name: Detect changes
     uses: ./.github/workflows/detect.yml
-    with:
-      event-name: ${{ github.event_name }}
-      base-ref: ${{ github.event_name == 'pull_request' && github.base_ref || github.event.before }}
 
   lint:
     name: Lint
@@ -54,7 +51,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
-      - name: Build binary
+      - name: Build
         working-directory: services/api
         run: go build -o bin/api .
 
@@ -71,4 +68,4 @@ jobs:
       - name: Deploy api
         run: |
           echo "Deploying api @ ${{ github.sha }}"
-          echo "Affected: ${{ needs.detect.outputs.affected }}"
+          echo "Affected services: ${{ needs.detect.outputs.affected }}"
