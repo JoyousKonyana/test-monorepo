@@ -6,13 +6,16 @@ name: Deltaflow Detect (Reusable)
 on:
   workflow_call:
     inputs:
-      base-ref:
-        description: "Base ref to compare against (default: auto-detected)"
+      event-name:
+        description: "The caller's event name (push or pull_request)"
         type: string
-        required: false
-        default: ""
+        required: true
+      base-ref:
+        description: "For pull_request: the target branch. For push: the before commit SHA."
+        type: string
+        required: true
       config-path:
-        description: "Path to deltaflow.yml (default: ./deltaflow.yml)"
+        description: "Path to deltaflow.yml"
         type: string
         required: false
         default: "./deltaflow.yml"
@@ -67,24 +70,27 @@ jobs:
       - name: Resolve base ref
         id: base
         run: |
-          # If caller explicitly passed a base-ref, use it
-          if [ -n "${{ inputs.base-ref }}" ]; then
-            BASE="${{ inputs.base-ref }}"
+          EVENT="${{ inputs.event-name }}"
+          REF="${{ inputs.base-ref }}"
 
-          # For pull requests — compare against the target branch
-          elif [ "${{ github.event_name }}" == "pull_request" ]; then
-            BASE="origin/${{ github.base_ref }}"
+          if [ "$EVENT" == "pull_request" ]; then
+            # REF is the target branch name e.g. "master"
+            BASE="origin/$REF"
 
-          # For pushes — compare against the commit before this push
+          elif [ "$EVENT" == "push" ]; then
+            # REF is the SHA of the commit before this push
+            # If all zeros it is the first push ever — fall back to HEAD~1
+            if [ "$REF" = "0000000000000000000000000000000000000000" ] || [ -z "$REF" ]; then
+              BASE="HEAD~1"
+            else
+              BASE="$REF"
+            fi
+
           else
-            BASE="${{ github.event.before }}"
-          fi
-
-          # Fallback: if BASE is all zeros (first ever push) or empty, use HEAD~1
-          if [ "$BASE" = "0000000000000000000000000000000000000000" ] || [ -z "$BASE" ]; then
             BASE="HEAD~1"
           fi
 
+          echo "Event:         $EVENT"
           echo "Resolved base: $BASE"
           echo "base=$BASE" >> $GITHUB_OUTPUT
 
@@ -105,6 +111,7 @@ jobs:
           echo "| frontend | \`${{ steps.delta.outputs.frontend }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| worker   | \`${{ steps.delta.outputs.worker }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Event:** \`${{ inputs.event-name }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Base ref:** \`${{ steps.base.outputs.base }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Affected:** \`${{ steps.delta.outputs.affected }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Global trigger:** \`${{ steps.delta.outputs.global_trigger }}\`" >> $GITHUB_STEP_SUMMARY
